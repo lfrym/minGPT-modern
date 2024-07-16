@@ -107,3 +107,25 @@ class Trainer:
             # termination conditions
             if config.max_iters is not None and self.iter_num >= config.max_iters:
                 break
+
+    def evaluate(self, test_dataset):
+        model, config = self.model, self.config
+
+        # setup the dataloader
+        test_loader = DataLoader(
+            test_dataset,
+            shuffle=False,
+            pin_memory=True,
+            batch_size=config.batch_size,
+            num_workers=config.num_workers,
+        )
+
+        model.eval()
+        total_loss = 0.0
+        with torch.no_grad():
+            for batch in test_loader:
+                batch = [t.to(self.device) for t in batch]
+                x, y = batch
+                _, loss = model(x, y)
+                total_loss += loss.item()
+        return total_loss / len(test_loader)

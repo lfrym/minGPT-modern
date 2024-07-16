@@ -25,6 +25,25 @@ class NewGELU(nn.Module):
     """
     def forward(self, x):
         return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
+    
+
+class SwiGLU(nn.Module):
+    """
+    Implementation of SwiGLU.
+    Reference: GLU Variants Improve Transformer: https://arxiv.org/abs/2002.05202v1
+    """
+    def __init__(self, w1, w2, w3) -> None:
+        super().__init__()
+        self.w1 = w1
+        self.w2 = w2
+        self.w3 = w3
+    
+    def forward(self, x):
+        x1 = F.linear(x, self.w1.weight)
+        x2 = F.linear(x, self.w2.weight)
+        hidden = F.silu(x1) * x2
+        return F.linear(hidden, self.w3.weight)
+
 
 class CausalSelfAttention(nn.Module):
     """

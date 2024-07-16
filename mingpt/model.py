@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torchtune.modules import RotaryPositionalEmbeddings, RMSNorm
-from transformers import Adafactor
+from transformers import Adafactor, get_cosine_with_hard_restarts_schedule_with_warmup
 
 from mingpt.utils import CfgNode as CN
 

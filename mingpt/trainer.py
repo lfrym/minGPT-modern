@@ -7,6 +7,8 @@ import time
 from collections import defaultdict
 
 import torch
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from transformers import get_cosine_with_hard_restarts_schedule_with_warmup
 from torch.utils.data.dataloader import DataLoader
 from mingpt.utils import CfgNode as CN
 
@@ -29,12 +31,15 @@ class Trainer:
 
         # modern improvements
         C.optimizer = 'adamw' # original 'adamw' or optional 'adafactor'
+        C.scheduler = None # If None, default to lr with decay. Use 'cosine' for cosine annealing
+        C.steps_per_cosine_cycle = 5000
         return C
 
     def __init__(self, config, model, train_dataset):
         self.config = config
         self.model = model
         self.optimizer = None
+        self.scheduler = config.scheduler
         self.train_dataset = train_dataset
         self.callbacks = defaultdict(list)
 
@@ -64,18 +69,25 @@ class Trainer:
     def run(self):
         model, config = self.model, self.config
 
-        # setup the optimizer
-        self.optimizer = model.configure_optimizers(config)
-
         # setup the dataloader
         train_loader = DataLoader(
             self.train_dataset,
-            sampler=torch.utils.data.RandomSampler(self.train_dataset, replacement=True, num_samples=int(1e10)),
+            # sampler=torch.utils.data.RandomSampler(self.train_dataset, replacement=True, num_samples=int(1e10)),
             shuffle=False,
             pin_memory=True,
             batch_size=config.batch_size,
             num_workers=config.num_workers,
         )
+
+        # setup the optimizer and scheduler
+        self.optimizer = model.configure_optimizers(config)
+        if config.scheduler is not None:
+            self.scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
+                self.optimizer,
+                num_warmup_steps=0,
+                num_training_steps=len(train_loader),
+                num_cycles=len(train_loader) // config.steps_per_cosine_cycle
+            )
 
         model.train()
         self.iter_num = 0
@@ -100,6 +112,8 @@ class Trainer:
             self.loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_norm_clip)
             self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
 
             self.trigger_callbacks('on_batch_end')
             self.iter_num += 1

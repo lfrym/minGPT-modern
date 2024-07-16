@@ -11,7 +11,6 @@ from mingpt.utils import set_seed, batch_end_callback
 set_seed(42)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
 # set up data
 dataset = datasets.load_dataset('Skylion007/openwebtext', trust_remote_code=True)
 train_test_split = dataset["train"].train_test_split(test_size=0.2)
@@ -30,6 +29,7 @@ train_config = Trainer.get_default_config()
 train_config.learning_rate = 5e-5
 train_config.max_iters = 2000
 train_config.num_workers = 0
+train_config.scheduler = 'cosine'
 
 trainer = Trainer(train_config, model, train_dataset)
 trainer.set_callback('on_batch_end', batch_end_callback)

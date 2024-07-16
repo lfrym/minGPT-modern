@@ -13,6 +13,8 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torchtune.modules import RotaryPositionalEmbeddings, RMSNorm
+from transformers import Adafactor
 
 from mingpt.utils import CfgNode as CN
 
@@ -94,13 +96,31 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = nn.LayerNorm(config.n_embd)
+        if config.act == 'gelu':
+            self.act = NewGELU()
+        elif config.act == 'swiglu':
+            self.act = SwiGLU(
+                nn.Linear(config.n_embd, config.n_embd),
+                nn.Linear(config.n_embd, config.n_embd),
+                nn.Linear(config.n_embd, config.n_embd)
+            )
+        else:
+            raise ValueError(f"Unknown activation function: {config.act}")
+
+        if config.norm == 'layer_norm':
+            self.norm = nn.LayerNorm(config.n_embd)
+        elif config.norm == 'rmsnorm':
+            self.norm = RMSNorm(config.n_embd)
+        else:
+            raise ValueError(f"Unknown normalization layer: {config.norm}")
+
+        self.ln_1 = self.norm
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = nn.LayerNorm(config.n_embd)
+        self.ln_2 = self.norm
         self.mlp = nn.ModuleDict(dict(
             c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd),
             c_proj  = nn.Linear(4 * config.n_embd, config.n_embd),
-            act     = NewGELU(),
+            act     = self.act,
             dropout = nn.Dropout(config.resid_pdrop),
         ))
         m = self.mlp
@@ -129,6 +149,10 @@ class GPT(nn.Module):
         C.embd_pdrop = 0.1
         C.resid_pdrop = 0.1
         C.attn_pdrop = 0.1
+        # modern improvements
+        C.act = 'gelu' # activation function. Support for original 'gelu' and modern 'swiglu'
+        C.norm = 'layer_norm' # normalization layer. Support for 'layer_norm' and 'rmsnorm'
+
         return C
 
     def __init__(self, config):
@@ -273,7 +297,19 @@ class GPT(nn.Module):
             {"params": [param_dict[pn] for pn in sorted(list(decay))], "weight_decay": train_config.weight_decay},
             {"params": [param_dict[pn] for pn in sorted(list(no_decay))], "weight_decay": 0.0},
         ]
-        optimizer = torch.optim.AdamW(optim_groups, lr=train_config.learning_rate, betas=train_config.betas)
+        if train_config.optimizer == 'adamw':
+            optimizer = torch.optim.AdamW(
+                optim_groups, 
+                lr=train_config.learning_rate, 
+                betas=train_config.betas
+            )
+        elif train_config.optimizer == 'adafactor':
+            optimizer = Adafactor(
+                optim_groups, 
+                lr=train_config.learning_rate, 
+                beta1=train_config.betas[0], 
+                weight_decay=train_config.weight_decay
+            )
         return optimizer
 
     def forward(self, idx, targets=None):
